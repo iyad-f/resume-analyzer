@@ -1,101 +1,176 @@
-import Image from "next/image";
+"use client";
+
+import { useState } from "react";
+import { AffindaCredential, AffindaAPI } from "@affinda/affinda";
+
+const credential = new AffindaCredential(
+  process.env.NEXT_PUBLIC_AFFINDA_API_KEY as string
+);
+const client = new AffindaAPI(credential);
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
+  const [score, setScore] = useState<number | null>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [jobDescription, setJobDescription] = useState<string>("");
+  const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
+  const [suggestions, setSuggestions] = useState<Array<string> | null>(null);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
+  const handleDrop = (event: React.DragEvent<HTMLLabelElement>) => {
+    event.preventDefault();
+    setFile(event.dataTransfer.files![0]);
+  };
+
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setFile(event.target.files![0]);
+  };
+
+  const analyzeResume = async () => {
+    if (!file) {
+      return alert("Please upload your resume.");
+    }
+
+    const jobDescInp = document.getElementById(
+      "job-description"
+    ) as HTMLTextAreaElement;
+    const jobDesc = jobDescInp.value;
+
+    if (jobDesc.length < 30) {
+      return alert("Job description must be atleast 30 charecters long.");
+    }
+
+    if (jobDesc.length > 2000) {
+      return alert("Job description cannot be longer than 2000 charecters");
+    }
+
+    try {
+      setIsAnalyzing(true);
+      setJobDescription(jobDesc);
+
+      const resume = await client.createResume({
+        file: file.stream(),
+      });
+
+      await client.createIndexDocument("my-index", {
+        document: resume.meta.identifier,
+      });
+
+      const blob = new Blob([jobDesc], { type: "text/plain" });
+      const jd = await client.createJobDescription({
+        file: blob.stream(),
+      });
+
+      console.log(jd);
+
+      const match = await client.getResumeSearchMatch(
+        resume.meta.identifier as string,
+        jd.meta.identifier as string
+      );
+
+      const skills = jd.data?.skills;
+      if (skills) {
+        const sugs = await client.getResumeSearchSuggestionSkill(
+          skills
+            .map((s) => s?.parsed)
+            .filter((s) => s !== undefined && s !== null)
+        );
+        // the library is weird, according to the library
+        // sugs should be an object having body as n attr
+        // which will be an array of strings but the sugs
+        // itself is that array
+        setSuggestions(sugs as any);
+      }
+
+      setScore((match.score || 0) * 100);
+      setIsAnalyzing(false);
+    } catch (e: any) {
+      if (e.message.includes("no_parsing_credits")) {
+        setIsAnalyzing(false);
+        alert("Your daily limit has reahced please try again later.");
+      }
+    }
+  };
+
+  return (
+    <main className="py-12 flex flex-col items-center justify-center">
+      <div className="flex flex-col items-start gap-4">
+        <h1 className="text-[40px] leading-[60px] font-medium">
+          Is your resume good enough?
+        </h1>
+
+        {isAnalyzing ? (
+          <span className="self-center">
+            Please wait while we analyze your resume...
+          </span>
+        ) : (
+          <>
+            <input
+              type="file"
+              id="file-upload"
+              className="hidden"
+              accept=".pdf,.docx"
+              onChange={handleFileUpload}
             />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:min-w-44"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
-        </div>
-      </main>
-      <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+
+            <label
+              className={`
+                border-[1px] rounded-[10px]
+                border-dashed border-gray-500
+                px-10 py-6 flex flex-col items-center
+                justify-center min-w-full min-h-36
+                ${!isAnalyzing && "hover:cursor-pointer"}
+                `}
+              htmlFor="file-upload"
+              onClick={(e) => {
+                isAnalyzing && e.preventDefault();
+              }}
+              onDrop={handleDrop}
+              onDragOver={(event) => event.preventDefault()}
+            >
+              {file ? (
+                <span className="text-center">
+                  Uploaded File: {file.name}
+                  <br />
+                  You can drop or choose another file.
+                </span>
+              ) : (
+                <span className="text-center">
+                  Drop your resume here or choose a file.
+                  <br />
+                  PDF & DOCX only. Max 2MB file size.
+                </span>
+              )}
+            </label>
+
+            <textarea
+              id="job-description"
+              placeholder="Enter your job description"
+              className="border-[1px] border-gray-300 rounded-[4px] px-4 py-2 min-w-full max-w-md focus:border-none bg-transparent min-h-32"
+              maxLength={2000}
+              minLength={30}
+              defaultValue={jobDescription}
+            />
+
+            <button
+              className="bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 hover:from-teal-400 hover:to-blue-500 rounded-[4px] px-4 py-2 font-bold"
+              onClick={analyzeResume}
+            >
+              Analyze Resume
+            </button>
+
+            {score != null && (
+              <div className="border-[1px] border-gray-300 rounded-[4px] px-4 py-2 min-w-full flex flex-col items-start">
+                <h1 className="self-center font-bold text-[25px]">Result</h1>
+
+                <span>Your resume scored {score}/100.</span>
+
+                {suggestions && (
+                  <span>Suggestions: {suggestions.join(", ")}</span>
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </main>
   );
 }
