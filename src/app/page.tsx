@@ -50,16 +50,28 @@ export default function Home() {
         file: file.stream(),
       });
 
-      await client.createIndexDocument("my-index", {
-        document: resume.meta.identifier,
-      });
+      const indexDoc = async () => {
+        await client.createIndexDocument("my-index", {
+          document: resume.meta.identifier,
+        });
+      };
+
+      // apperently we first need to create an index and then
+      // index the document and only then we can proceed, but
+      // if the index doesnt exist it will raise an exception
+      // and hence the try catch. this is probbaly the only
+      // exception that can raise here. The api is unclear
+      try {
+        await indexDoc();
+      } catch (e) {
+        await client.createIndex({ name: "my-index" });
+        await indexDoc();
+      }
 
       const blob = new Blob([jobDesc], { type: "text/plain" });
       const jd = await client.createJobDescription({
         file: blob.stream(),
       });
-
-      console.log(jd);
 
       const match = await client.getResumeSearchMatch(
         resume.meta.identifier as string,
